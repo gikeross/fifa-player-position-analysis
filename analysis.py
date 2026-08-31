@@ -3,9 +3,16 @@
 The original project notebook is preserved for historical context. This script provides
 an executable, safer version of the core workflow using repository-relative data paths.
 
-Expected source files (not redistributed in this repository):
+Preferred historical inputs (not redistributed in this repository):
     data/FIFA_TRAIN_DATA.CSV
     data/FIFA_TEST_DATA.CSV
+
+Reproducible fallback input:
+    data/fifa21 raw data v2.csv
+
+The fallback file matches the 18,979-row / 77-column FIFA 21 raw dataset schema used by
+the original project. It is analysed directly and is NOT presented as a reconstruction
+of the original Ironhack train/test split.
 """
 
 from __future__ import annotations
@@ -29,6 +36,7 @@ OUTPUT_DIR = ROOT / "outputs"
 ASSET_DIR = ROOT / "assets"
 TRAIN_PATH = DATA_DIR / "FIFA_TRAIN_DATA.CSV"
 TEST_PATH = DATA_DIR / "FIFA_TEST_DATA.CSV"
+RAW_PATH = DATA_DIR / "fifa21 raw data v2.csv"
 
 POSITION_GROUPS = {
     "CB": "defence",
@@ -48,13 +56,26 @@ POSITION_GROUPS = {
     "GK": "goalkeeper",
 }
 
+COLUMN_ALIASES = {
+    "↓ova": "ova",
+    "best_position": "bp",
+    "preferred_foot": "foot",
+    "long_name": "longname",
+    "photo_url": "player_photo",
+    "flag_photo_url": "flag_photo",
+    "club_logo_url": "club_logo",
+}
+
 DROP_COLUMNS = {
     "unnamed:_0",
     "nationality",
     "club",
     "bp",
     "position",
+    "positions",
     "player_photo",
+    "photourl",
+    "playerurl",
     "club_logo",
     "flag_photo",
     "team_&_contract",
@@ -67,6 +88,7 @@ DROP_COLUMNS = {
     "a/w",
     "d/w",
     "name",
+    "longname",
     "id",
     "bov",
     "pot",
@@ -80,7 +102,11 @@ _ALLOWED_OPERATORS = {
 
 def clean_column_names(frame: pd.DataFrame) -> pd.DataFrame:
     frame = frame.copy()
-    frame.columns = [str(col).strip().lower().replace(" ", "_") for col in frame.columns]
+    cleaned = [
+        str(col).strip().lower().replace(" ", "_").replace("-", "_")
+        for col in frame.columns
+    ]
+    frame.columns = [COLUMN_ALIASES.get(col, col) for col in cleaned]
     return frame
 
 
@@ -120,7 +146,8 @@ def parse_height_cm(value: object) -> float:
 
     text = str(value).strip().replace('"', "")
     if "'" not in text:
-        return pd.to_numeric(text, errors="coerce")
+        numeric = pd.to_numeric(text.replace("cm", "").strip(), errors="coerce")
+        return float(numeric) if pd.notna(numeric) else np.nan
 
     try:
         feet_text, inches_text = text.split("'", 1)
@@ -136,7 +163,12 @@ def parse_weight_kg(value: object) -> float:
     if isinstance(value, (int, float, np.number)):
         return float(value)
 
-    text = str(value).lower().strip().replace("lbs", "").replace("lb", "").strip()
+    text = str(value).lower().strip()
+    if text.endswith("kg"):
+        number = pd.to_numeric(text.removesuffix("kg").strip(), errors="coerce")
+        return float(number) if pd.notna(number) else np.nan
+
+    text = text.replace("lbs", "").replace("lb", "").strip()
     number = pd.to_numeric(text, errors="coerce")
     if pd.isna(number):
         return np.nan
@@ -202,26 +234,27 @@ def prepare_frame(frame: pd.DataFrame) -> pd.DataFrame:
         if column in frame.columns:
             frame[column] = frame[column].map(parse_stars)
 
-    # FIFA attribute columns can contain strings such as "75+2". Apply the safe
-    # parser only to object columns rather than evaluating arbitrary Python code.
     for column in frame.select_dtypes(include="object").columns:
         frame[column] = frame[column].map(parse_simple_expression)
 
     return frame
 
 
-def load_data() -> tuple[pd.DataFrame, pd.DataFrame]:
-    missing = [path.name for path in (TRAIN_PATH, TEST_PATH) if not path.exists()]
-    if missing:
-        raise FileNotFoundError(
-            "Missing FIFA source dataset(s): "
-            + ", ".join(missing)
-            + ". See data/README.md for setup instructions."
-        )
+def load_data() -> tuple[pd.DataFrame, pd.DataFrame | None, str]:
+    """Load the historical split when available, otherwise use the verified raw schema."""
+    if TRAIN_PATH.exists():
+        train = prepare_frame(pd.read_csv(TRAIN_PATH, sep="?"))
+        test = prepare_frame(pd.read_csv(TEST_PATH, sep="?")) if TEST_PATH.exists() else None
+        return train, test, "historical-train-split"
 
-    train = pd.read_csv(TRAIN_PATH, sep="?")
-    test = pd.read_csv(TEST_PATH, sep="?")
-    return prepare_frame(train), prepare_frame(test)
+    if RAW_PATH.exists():
+        raw = prepare_frame(pd.read_csv(RAW_PATH, low_memory=False))
+        return raw, None, "fifa21-raw-data-v2"
+
+    raise FileNotFoundError(
+        "No FIFA source dataset found. Add either FIFA_TRAIN_DATA.CSV (and optionally "
+        "FIFA_TEST_DATA.CSV) or fifa21 raw data v2.csv under data/. See data/README.md."
+    )
 
 
 def numeric_feature_frame(frame: pd.DataFrame) -> pd.DataFrame:
@@ -232,9 +265,9 @@ def numeric_feature_frame(frame: pd.DataFrame) -> pd.DataFrame:
 
 def fit_position_models(train: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     if "ova" not in train.columns:
-        raise ValueError("Training dataset must contain the target column 'ova'.")
+        raise ValueError("Dataset must contain the target column 'ova'.")
     if "position_group" not in train.columns:
-        raise ValueError("Training dataset must contain a usable 'bp' position column.")
+        raise ValueError("Dataset must contain a usable best-position column ('bp' / 'Best Position').")
 
     metric_rows: list[dict[str, object]] = []
     feature_rows: list[dict[str, object]] = []
@@ -250,7 +283,6 @@ def fit_position_models(train: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame
         X = X.loc[valid]
         y = y.loc[valid]
 
-        # Drop extremely sparse features before fitting.
         X = X.loc[:, X.notna().mean() >= 0.7]
         if len(X) < 30 or X.shape[1] == 0:
             continue
@@ -294,9 +326,13 @@ def fit_position_models(train: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame
     return pd.DataFrame(metric_rows), pd.DataFrame(feature_rows)
 
 
-def generate_outputs(train: pd.DataFrame) -> None:
+def generate_outputs(train: pd.DataFrame, source_label: str) -> None:
     OUTPUT_DIR.mkdir(exist_ok=True)
     ASSET_DIR.mkdir(exist_ok=True)
+
+    pd.DataFrame([{"analysis_source": source_label, "rows": len(train)}]).to_csv(
+        OUTPUT_DIR / "analysis_source.csv", index=False
+    )
 
     distribution = (
         train["position_group"]
@@ -332,9 +368,9 @@ def generate_outputs(train: pd.DataFrame) -> None:
 
 
 def main() -> None:
-    train, _test = load_data()
-    generate_outputs(train)
-    print("Generated FIFA portfolio outputs in outputs/ and assets/.")
+    train, _test, source_label = load_data()
+    generate_outputs(train, source_label)
+    print(f"Generated FIFA portfolio outputs from {source_label} in outputs/ and assets/.")
 
 
 if __name__ == "__main__":
