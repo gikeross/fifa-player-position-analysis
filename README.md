@@ -1,76 +1,130 @@
 # FIFA Player Position Analysis
 
-A Python data-analysis project exploring FIFA player data, with a focus on player positions and the attributes associated with different roles on the pitch.
+A Python sports-analytics project exploring how FIFA player attributes vary by position and how well position-specific regression models can explain a player's **Overall (OVA)** rating.
 
-## Overview
+## Project Goal
 
-This repository contains the original Jupyter analysis together with the final project presentation. The workflow covers data cleaning, feature preparation, player-position grouping and exploratory analysis.
+The original analysis groups detailed FIFA positions into four broader football roles:
 
-## Repository Contents
+- **Goalkeeper**
+- **Defence**
+- **Midfield**
+- **Attack**
 
-| File | Purpose |
-| --- | --- |
-| `project1_fifa_position_def.ipynb` | Original Python/Jupyter analysis |
-| `FIFA PROJECT PRESENTATION 2023.pdf` | Final presentation |
-| `data/README.md` | Instructions for restoring the source datasets locally |
-| `requirements.txt` | Python dependencies |
+The aim is to clean the raw player attributes, compare those groups, and fit separate regression models rather than assuming the same attributes matter equally for every position.
 
-## Data Setup
+## Portfolio Version
 
-The notebook expects two source files:
+`analysis.py` is now the recommended entry point for the project. It provides a portable and safer version of the core notebook workflow:
 
-- `FIFA_TRAIN_DATA.CSV`
-- `FIFA_TEST_DATA.CSV`
+1. loads the training and test CSVs from `data/`;
+2. standardizes column names;
+3. groups detailed FIFA positions into broad football roles;
+4. converts value/wage strings into numeric amounts;
+5. converts height and weight into metric units;
+6. extracts star ratings into numeric features;
+7. safely resolves simple FIFA attribute expressions such as `75+2`;
+8. trains a separate linear-regression model for each broad position group;
+9. evaluates each model using **MAE, RMSE and R²**;
+10. exports model metrics, top coefficients and portfolio charts.
 
-Those datasets are **not currently included in the repository**. Their original source/licensing details are not documented well enough to redistribute them safely, so the project does not fabricate or silently replace them.
+Run it with:
 
-To run the analysis locally, place the two files in a `data/` directory:
+```bash
+pip install -r requirements.txt
+python analysis.py
+```
+
+## Data Availability
+
+The project expects:
+
+```text
+data/FIFA_TRAIN_DATA.CSV
+data/FIFA_TEST_DATA.CSV
+```
+
+These datasets are **not currently included in the repository**. Their original source/licensing details were not documented well enough to redistribute them safely, so the repository does not fabricate or silently replace them.
+
+See [`data/README.md`](data/README.md) for setup details.
+
+Until the original files are restored, the automated tests validate the reusable cleaning/transformation logic, while full model outputs cannot be regenerated honestly.
+
+## Expected Outputs
+
+When the source CSVs are available, `analysis.py` generates:
+
+```text
+outputs/
+├── position_distribution.csv
+├── model_metrics.csv
+└── top_model_features.csv
+
+assets/
+├── position_distribution.png
+└── model_r2_by_position.png
+```
+
+The model metrics file reports the number of players/features plus validation **MAE, RMSE and R²** for each position group. `top_model_features.csv` records the largest absolute linear-regression coefficients for each model.
+
+## Reliability and Code Quality
+
+The historical notebook is preserved as the original exploratory work, but the portable script corrects several maintainability issues:
+
+- repository-relative paths instead of `/Users/...` paths;
+- reusable transformation functions rather than long nested `np.where` statements;
+- safe parsing of numeric expressions instead of applying Python `eval()` across the dataframe;
+- explicit missing-data checks;
+- reproducible train/validation splits (`random_state=42`);
+- automated transformation tests with `pytest`;
+- GitHub Actions CI on relevant pushes and pull requests.
+
+Run the tests locally with:
+
+```bash
+pytest -q
+```
+
+## Original Notebook
+
+`project1_fifa_position_def.ipynb` contains the full historical analysis, including the original data-cleaning workflow, position categorization and regression exploration. It is retained to show the development process, while `analysis.py` should be treated as the cleaner portfolio implementation.
+
+## Repository Structure
 
 ```text
 fifa-player-position-analysis/
-├── data/
-│   ├── FIFA_TRAIN_DATA.CSV
-│   └── FIFA_TEST_DATA.CSV
-├── project1_fifa_position_def.ipynb
+├── analysis.py                         # Portable analysis/model pipeline
+├── tests/test_analysis.py              # Transformation tests
+├── .github/workflows/tests.yml         # Continuous integration
+├── data/README.md                      # Dataset restoration instructions
+├── project1_fifa_position_def.ipynb    # Original exploratory notebook
+├── FIFA PROJECT PRESENTATION 2023.pdf  # Final project presentation
+├── requirements.txt
 └── README.md
 ```
-
-Then use repository-relative paths in the notebook:
-
-```python
-from pathlib import Path
-
-DATA_DIR = Path("data")
-fifa_test = pd.read_csv(DATA_DIR / "FIFA_TEST_DATA.CSV", sep="?")
-fifa_train = pd.read_csv(DATA_DIR / "FIFA_TRAIN_DATA.CSV", sep="?")
-```
-
-The historical notebook still contains the original local Mac paths from development; `data/README.md` documents the portable replacement.
-
-## Analysis Focus
-
-The project groups FIFA positions into broader categories such as defence, midfield, attack and goalkeeper, then prepares player attributes for analysis. The notebook includes cleaning steps for missing values, categorical fields, wages/values and physical attributes.
 
 ## Technologies
 
 - Python
-- Jupyter Notebook
 - pandas / NumPy
 - scikit-learn
-- statsmodels
-- matplotlib / seaborn
+- matplotlib
+- statsmodels / Jupyter (historical notebook)
+- pytest
+- GitHub Actions
 
 ## Skills Demonstrated
 
-- exploratory data analysis
-- data cleaning and preparation
-- feature engineering
-- player-position categorization
-- regression/model evaluation concepts
 - sports-data analysis
-- data visualization
-- analytical storytelling
+- data cleaning and feature engineering
+- position-based segmentation
+- regression modelling
+- MAE / RMSE / R² evaluation
+- categorical domain mapping
+- reproducible Python workflows
+- safe parsing and data transformation
+- automated testing and CI
 
-## How to Explore the Project
+## Current Limitation
 
-Start with the PDF presentation for a concise overview of the project, then review `project1_fifa_position_def.ipynb` for the detailed analytical workflow. To execute the notebook yourself, first follow the dataset instructions in `data/README.md`.
+The largest remaining gap is data provenance. Once the original FIFA CSV source is identified and redistribution rights are clear, the best next step is to restore the data (or provide a documented download link), run `analysis.py`, commit the generated metrics/charts, and surface the strongest model findings directly in this README.
